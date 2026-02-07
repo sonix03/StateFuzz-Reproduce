@@ -18,8 +18,10 @@ Important environment variables:
   KERNEL_TAG=...        Linux tag (default: v4.19)
   IMAGE_DISTRO=...      Debian distro for VM image (default: bullseye)
   VM_COUNT=...          Number of QEMU VMs (default: 2)
-  PROCS=...             Fuzzer procs per VM (default: 2)
+  PROCS=...             Fuzzer procs per VM (default: 4)
   HTTP_ADDR=...         Manager HTTP bind (default: 127.0.0.1:56741)
+  CLEAN=1               Remove previous build artifacts before setup
+  CLEAN_KERNEL_SRC=1    Also delete existing kernel source checkout
   DISABLE_SELINUX=1     Disable CONFIG_SECURITY_SELINUX (default: 1)
   DISABLE_FCF_PROTECTION=1
                         Force -fcf-protection=none for kernel/host tools (default: 1)
@@ -157,13 +159,15 @@ KERNEL_BUILD_LOG="${KERNEL_BUILD_LOG:-$WORK_BASE/kernel/build-kernel-4.19.log}"
 VM_COUNT="${VM_COUNT:-2}"
 VM_CPU="${VM_CPU:-2}"
 VM_MEM="${VM_MEM:-2048}"
-PROCS="${PROCS:-2}"
+PROCS="${PROCS:-4}"
 HTTP_ADDR="${HTTP_ADDR:-127.0.0.1:56741}"
 JOBS="${JOBS:-$(nproc)}"
 CC_BIN="${CC_BIN:-gcc}"
 GO_BOOTSTRAP_VERSION="${GO_BOOTSTRAP_VERSION:-1.20.14}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-0}"
 RUN_MANAGER="${RUN_MANAGER:-0}"
+CLEAN="${CLEAN:-0}"
+CLEAN_KERNEL_SRC="${CLEAN_KERNEL_SRC:-0}"
 # Building old kernels (e.g. 4.19) on modern distros can fail in
 # scripts/selinux/genheaders with:
 #   "New address family defined, please update secclass_map."
@@ -191,6 +195,16 @@ require_cmd wget
 check_go_version
 
 [[ -d "$STATEFUZZ_DIR" ]] || die "StateFuzz source not found: $STATEFUZZ_DIR"
+
+if [[ "$CLEAN" == "1" ]]; then
+	log "Cleaning previous artifacts..."
+	rm -rf "$KERNEL_OBJ" "$IMAGE_DIR" "$WORKDIR" "$STATE_MODEL_DIR"
+	rm -f "$MANAGER_CFG"
+	if [[ "$CLEAN_KERNEL_SRC" == "1" ]]; then
+		log "Cleaning kernel source checkout..."
+		rm -rf "$KERNEL_SRC"
+	fi
+fi
 
 mkdir -p "$WORK_BASE" "$WORKDIR" "$STATE_MODEL_DIR" "$IMAGE_DIR" "$KERNEL_OBJ"
 
@@ -233,6 +247,7 @@ if [[ -x "$KERNEL_SRC/scripts/config" || -f "$KERNEL_SRC/scripts/config" ]]; the
 		-e DEBUG_INFO \
 		-e KALLSYMS \
 		-e KALLSYMS_ALL \
+		-e TUN \
 		-e CONFIGFS_FS \
 		-e SECURITYFS \
 		-e NAMESPACES \
