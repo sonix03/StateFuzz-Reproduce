@@ -16,6 +16,7 @@ Important environment variables:
   RUN_MANAGER=1         Start syz-manager after setup
   WORK_BASE=...         Workspace base (default: $HOME/statefuzz-4.19)
   KERNEL_TAG=...        Linux tag (default: v4.19)
+  IMAGE_DISTRO=...      Debian distro for VM image (default: bullseye)
   VM_COUNT=...          Number of QEMU VMs (default: 2)
   PROCS=...             Fuzzer procs per VM (default: 2)
   HTTP_ADDR=...         Manager HTTP bind (default: 127.0.0.1:56741)
@@ -143,7 +144,7 @@ KERNEL_TAG="${KERNEL_TAG:-v4.19}"
 KERNEL_SRC="${KERNEL_SRC:-$WORK_BASE/kernel/linux-4.19}"
 KERNEL_OBJ="${KERNEL_OBJ:-$WORK_BASE/kernel/linux-out-4.19}"
 IMAGE_DIR="${IMAGE_DIR:-$WORK_BASE/image}"
-IMAGE_DISTRO="${IMAGE_DISTRO:-stretch}"
+IMAGE_DISTRO="${IMAGE_DISTRO:-bullseye}"
 IMAGE_FILE="${IMAGE_FILE:-$IMAGE_DIR/${IMAGE_DISTRO}.img}"
 SSH_KEY="${SSH_KEY:-$IMAGE_DIR/${IMAGE_DISTRO}.id_rsa}"
 STATE_MODEL_DIR="${STATE_MODEL_DIR:-$WORK_BASE/statemodel}"
