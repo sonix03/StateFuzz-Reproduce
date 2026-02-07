@@ -39,8 +39,20 @@ require_cmd() {
 	command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
 }
 
+ensure_go_on_path() {
+	if command -v go >/dev/null 2>&1; then
+		return
+	fi
+	if [[ -x /usr/local/go/bin/go ]]; then
+		export PATH="/usr/local/go/bin:$PATH"
+	fi
+}
+
 check_go_version() {
-	require_cmd go
+	ensure_go_on_path
+	if ! command -v go >/dev/null 2>&1; then
+		die "Missing command: go. Install Go >= 1.19 and ensure it is in PATH."
+	fi
 	local raw version major minor rest
 	raw="$(go version | awk '{print $3}')"
 	version="${raw#go}"
@@ -64,7 +76,7 @@ install_deps_if_needed() {
 	sudo apt-get update
 	sudo apt-get install -y \
 		bc bison debootstrap flex gcc git libelf-dev libncurses-dev \
-		libssl-dev make qemu-system-x86 wget
+		libssl-dev make qemu-system-x86 wget golang-go
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
