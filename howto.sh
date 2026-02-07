@@ -48,10 +48,60 @@ ensure_go_on_path() {
 	fi
 }
 
+go_version_supported() {
+	ensure_go_on_path
+	if ! command -v go >/dev/null 2>&1; then
+		return 1
+	fi
+	local raw version major minor rest
+	raw="$(go version | awk '{print $3}')"
+	version="${raw#go}"
+	major="${version%%.*}"
+	rest="${version#*.}"
+	minor="${rest%%.*}"
+	if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]]; then
+		return 1
+	fi
+	(( major > 1 || (major == 1 && minor >= 19) ))
+}
+
+install_go_toolchain() {
+	local go_arch tar_name go_url tmp_dir
+	case "$(uname -m)" in
+		x86_64|amd64) go_arch="amd64" ;;
+		aarch64|arm64) go_arch="arm64" ;;
+		*) die "Unsupported host arch for auto Go install: $(uname -m)" ;;
+	esac
+
+	tar_name="go${GO_BOOTSTRAP_VERSION}.linux-${go_arch}.tar.gz"
+	go_url="${GO_BOOTSTRAP_URL:-https://go.dev/dl/${tar_name}}"
+	tmp_dir="$(mktemp -d)"
+	log "Installing Go ${GO_BOOTSTRAP_VERSION} from ${go_url}"
+	wget -O "${tmp_dir}/${tar_name}" "${go_url}"
+	sudo rm -rf /usr/local/go
+	sudo tar -C /usr/local -xzf "${tmp_dir}/${tar_name}"
+	rm -rf "${tmp_dir}"
+	export PATH="/usr/local/go/bin:$PATH"
+}
+
 check_go_version() {
 	ensure_go_on_path
 	if ! command -v go >/dev/null 2>&1; then
-		die "Missing command: go. Install Go >= 1.19 and ensure it is in PATH."
+		if [[ "$AUTO_INSTALL_DEPS" == "1" ]]; then
+			install_go_toolchain
+		else
+			die "Missing command: go. Install Go >= 1.19 and ensure it is in PATH."
+		fi
+	fi
+	if ! go_version_supported; then
+		local current_go
+		current_go="$(go version | awk '{print $3}')"
+		if [[ "$AUTO_INSTALL_DEPS" == "1" ]]; then
+			log "Go version too old (${current_go}), upgrading..."
+			install_go_toolchain
+		else
+			die "Go >= 1.19 is required, found ${current_go}. Re-run with AUTO_INSTALL_DEPS=1 or install newer Go manually."
+		fi
 	fi
 	local raw version major minor rest
 	raw="$(go version | awk '{print $3}')"
@@ -104,6 +154,7 @@ PROCS="${PROCS:-2}"
 HTTP_ADDR="${HTTP_ADDR:-127.0.0.1:56741}"
 JOBS="${JOBS:-$(nproc)}"
 CC_BIN="${CC_BIN:-gcc}"
+GO_BOOTSTRAP_VERSION="${GO_BOOTSTRAP_VERSION:-1.20.14}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-0}"
 RUN_MANAGER="${RUN_MANAGER:-0}"
 
@@ -116,6 +167,7 @@ require_cmd qemu-system-x86_64
 require_cmd debootstrap
 require_cmd ssh-keygen
 require_cmd sudo
+require_cmd wget
 check_go_version
 
 [[ -d "$STATEFUZZ_DIR" ]] || die "StateFuzz source not found: $STATEFUZZ_DIR"
