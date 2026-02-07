@@ -146,6 +146,7 @@ SV_RANGE_JSON="${SV_RANGE_JSON:-$STATE_MODEL_DIR/sv_range.json}"
 SV_PAIRS_JSON="${SV_PAIRS_JSON:-$STATE_MODEL_DIR/sv_pairs.json}"
 WORKDIR="${WORKDIR:-$WORK_BASE/workdir}"
 MANAGER_CFG="${MANAGER_CFG:-$STATEFUZZ_DIR/my-4.19.cfg}"
+KERNEL_BUILD_LOG="${KERNEL_BUILD_LOG:-$WORK_BASE/kernel/build-kernel-4.19.log}"
 
 VM_COUNT="${VM_COUNT:-2}"
 VM_CPU="${VM_CPU:-2}"
@@ -232,7 +233,24 @@ fi
 make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" olddefconfig
 
 log "Building Linux kernel $KERNEL_TAG (this can take a while)..."
-make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" -j"$JOBS" bzImage vmlinux
+if ! make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" -j"$JOBS" bzImage vmlinux 2>&1 | tee "$KERNEL_BUILD_LOG"; then
+	log "Kernel build failed. Inspecting first compiler error..."
+	err_line="$(grep -n "error:" "$KERNEL_BUILD_LOG" | head -n1 | cut -d: -f1 || true)"
+	if [[ -n "${err_line}" ]]; then
+		start_line=1
+		if (( err_line > 35 )); then
+			start_line=$((err_line - 35))
+		fi
+		end_line=$((err_line + 35))
+		echo "----- kernel build error context -----" >&2
+		sed -n "${start_line},${end_line}p" "$KERNEL_BUILD_LOG" >&2
+		echo "--------------------------------------" >&2
+	else
+		log "No 'error:' token found; showing last 120 log lines."
+		tail -n 120 "$KERNEL_BUILD_LOG" >&2
+	fi
+	die "Kernel build failed. Full log: $KERNEL_BUILD_LOG"
+fi
 
 if [[ ! -f "$IMAGE_FILE" || ! -f "$SSH_KEY" ]]; then
 	log "Creating VM image ($IMAGE_DISTRO)..."
