@@ -1,0 +1,222 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# howto.sh
+# Prepare StateFuzz to run against Linux kernel v4.19 on QEMU (x86_64).
+# By default this script prepares everything and prints the run command.
+# Set RUN_MANAGER=1 to start syz-manager at the end.
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+cat <<'USAGE'
+Usage:
+  ./howto.sh
+
+Important environment variables:
+  AUTO_INSTALL_DEPS=1   Auto-install host deps with apt (requires sudo)
+  RUN_MANAGER=1         Start syz-manager after setup
+  WORK_BASE=...         Workspace base (default: $HOME/statefuzz-4.19)
+  KERNEL_TAG=...        Linux tag (default: v4.19)
+  VM_COUNT=...          Number of QEMU VMs (default: 2)
+  PROCS=...             Fuzzer procs per VM (default: 2)
+  HTTP_ADDR=...         Manager HTTP bind (default: 127.0.0.1:56741)
+
+Example:
+  AUTO_INSTALL_DEPS=1 RUN_MANAGER=1 ./howto.sh
+USAGE
+	exit 0
+fi
+
+log() {
+	echo "[howto] $*"
+}
+
+die() {
+	echo "[howto][error] $*" >&2
+	exit 1
+}
+
+require_cmd() {
+	command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"
+}
+
+check_go_version() {
+	require_cmd go
+	local raw version major minor rest
+	raw="$(go version | awk '{print $3}')"
+	version="${raw#go}"
+	major="${version%%.*}"
+	rest="${version#*.}"
+	minor="${rest%%.*}"
+	if ! [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]]; then
+		log "Cannot parse Go version from: $raw (continuing)"
+		return
+	fi
+	if (( major < 1 || (major == 1 && minor < 19) )); then
+		die "Go >= 1.19 is required, found $raw"
+	fi
+}
+
+install_deps_if_needed() {
+	if [[ "$AUTO_INSTALL_DEPS" != "1" ]]; then
+		return
+	fi
+	log "Installing host dependencies via apt..."
+	sudo apt-get update
+	sudo apt-get install -y \
+		bc bison debootstrap flex gcc git libelf-dev libncurses-dev \
+		libssl-dev make qemu-system-x86 wget
+}
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
+STATEFUZZ_DIR="${STATEFUZZ_DIR:-$REPO_ROOT/statefuzz}"
+
+WORK_BASE="${WORK_BASE:-$HOME/statefuzz-4.19}"
+KERNEL_TAG="${KERNEL_TAG:-v4.19}"
+KERNEL_SRC="${KERNEL_SRC:-$WORK_BASE/kernel/linux-4.19}"
+KERNEL_OBJ="${KERNEL_OBJ:-$WORK_BASE/kernel/linux-out-4.19}"
+IMAGE_DIR="${IMAGE_DIR:-$WORK_BASE/image}"
+IMAGE_DISTRO="${IMAGE_DISTRO:-stretch}"
+IMAGE_FILE="${IMAGE_FILE:-$IMAGE_DIR/${IMAGE_DISTRO}.img}"
+SSH_KEY="${SSH_KEY:-$IMAGE_DIR/${IMAGE_DISTRO}.id_rsa}"
+STATE_MODEL_DIR="${STATE_MODEL_DIR:-$WORK_BASE/statemodel}"
+SV_RANGE_JSON="${SV_RANGE_JSON:-$STATE_MODEL_DIR/sv_range.json}"
+SV_PAIRS_JSON="${SV_PAIRS_JSON:-$STATE_MODEL_DIR/sv_pairs.json}"
+WORKDIR="${WORKDIR:-$WORK_BASE/workdir}"
+MANAGER_CFG="${MANAGER_CFG:-$STATEFUZZ_DIR/my-4.19.cfg}"
+
+VM_COUNT="${VM_COUNT:-2}"
+VM_CPU="${VM_CPU:-2}"
+VM_MEM="${VM_MEM:-2048}"
+PROCS="${PROCS:-2}"
+HTTP_ADDR="${HTTP_ADDR:-127.0.0.1:56741}"
+JOBS="${JOBS:-$(nproc)}"
+CC_BIN="${CC_BIN:-gcc}"
+AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-0}"
+RUN_MANAGER="${RUN_MANAGER:-0}"
+
+install_deps_if_needed
+
+require_cmd git
+require_cmd make
+require_cmd "$CC_BIN"
+require_cmd qemu-system-x86_64
+require_cmd debootstrap
+require_cmd ssh-keygen
+require_cmd sudo
+check_go_version
+
+[[ -d "$STATEFUZZ_DIR" ]] || die "StateFuzz source not found: $STATEFUZZ_DIR"
+
+mkdir -p "$WORK_BASE" "$WORKDIR" "$STATE_MODEL_DIR" "$IMAGE_DIR" "$KERNEL_OBJ"
+
+log "Preparing Linux source ($KERNEL_TAG)..."
+if [[ ! -d "$KERNEL_SRC/.git" ]]; then
+	git clone --depth=1 --branch "$KERNEL_TAG" https://github.com/torvalds/linux.git "$KERNEL_SRC"
+else
+	log "Reusing existing kernel tree: $KERNEL_SRC"
+fi
+
+log "Building StateFuzz binaries..."
+(
+	cd "$STATEFUZZ_DIR"
+	make HOSTOS=linux HOSTARCH=amd64 TARGETOS=linux TARGETARCH=amd64 SOURCEDIR="$KERNEL_SRC"
+)
+
+log "Configuring kernel for fuzzing..."
+make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" defconfig
+if ! make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" kvmconfig; then
+	log "kvmconfig not available, continuing with defconfig"
+fi
+
+if [[ -x "$KERNEL_SRC/scripts/config" || -f "$KERNEL_SRC/scripts/config" ]]; then
+	chmod +x "$KERNEL_SRC/scripts/config"
+	"$KERNEL_SRC/scripts/config" --file "$KERNEL_OBJ/.config" \
+		-e KCOV \
+		-e KCOV_INSTRUMENT_ALL \
+		-e KCOV_ENABLE_COMPARISONS \
+		-e DEBUG_FS \
+		-e DEBUG_INFO \
+		-e KALLSYMS \
+		-e KALLSYMS_ALL \
+		-e CONFIGFS_FS \
+		-e SECURITYFS \
+		-e NAMESPACES \
+		-e UTS_NS \
+		-e IPC_NS \
+		-e PID_NS \
+		-e NET_NS \
+		-e USER_NS \
+		-e CGROUP_PIDS \
+		-e MEMCG \
+		-e KASAN \
+		-e KASAN_INLINE \
+		-d RANDOMIZE_BASE
+fi
+
+make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" olddefconfig
+
+log "Building Linux kernel $KERNEL_TAG (this can take a while)..."
+make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" -j"$JOBS" bzImage vmlinux
+
+if [[ ! -f "$IMAGE_FILE" || ! -f "$SSH_KEY" ]]; then
+	log "Creating VM image ($IMAGE_DISTRO)..."
+	(
+		cd "$IMAGE_DIR"
+		bash "$STATEFUZZ_DIR/tools/create-image.sh" -d "$IMAGE_DISTRO"
+	)
+else
+	log "Reusing VM image: $IMAGE_FILE"
+fi
+
+chmod 600 "$SSH_KEY"
+
+if [[ ! -f "$SV_RANGE_JSON" ]]; then
+	printf '[]\n' >"$SV_RANGE_JSON"
+fi
+if [[ ! -f "$SV_PAIRS_JSON" ]]; then
+	printf '[]\n' >"$SV_PAIRS_JSON"
+fi
+
+log "Writing manager config: $MANAGER_CFG"
+cat >"$MANAGER_CFG" <<EOF
+{
+  "name": "statefuzz-kernel4.19",
+  "target": "linux/amd64",
+  "http": "$HTTP_ADDR",
+  "workdir": "$WORKDIR",
+  "kernel_src": "$KERNEL_SRC",
+  "kernel_obj": "$KERNEL_OBJ",
+  "image": "$IMAGE_FILE",
+  "sshkey": "$SSH_KEY",
+  "syzkaller": "$STATEFUZZ_DIR",
+  "sv_range.json": "$SV_RANGE_JSON",
+  "sv_pairs.json": "$SV_PAIRS_JSON",
+  "procs": $PROCS,
+  "reproduce": false,
+  "type": "qemu",
+  "vm": {
+    "count": $VM_COUNT,
+    "kernel": "$KERNEL_OBJ/arch/x86/boot/bzImage",
+    "cpu": $VM_CPU,
+    "mem": $VM_MEM
+  }
+}
+EOF
+
+if [[ ! -r /dev/kvm ]]; then
+	log "Warning: /dev/kvm is not accessible. QEMU can be very slow or fail."
+fi
+
+if [[ "$RUN_MANAGER" == "1" ]]; then
+	log "Starting syz-manager..."
+	cd "$STATEFUZZ_DIR"
+	exec ./bin/syz-manager -config "$MANAGER_CFG"
+fi
+
+cat <<EOF
+[howto] Done.
+[howto] To start fuzzing:
+  cd "$STATEFUZZ_DIR"
+  ./bin/syz-manager -config "$MANAGER_CFG"
+EOF
