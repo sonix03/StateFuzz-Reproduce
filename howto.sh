@@ -163,6 +163,11 @@ RUN_MANAGER="${RUN_MANAGER:-0}"
 #   "New address family defined, please update secclass_map."
 # Keep SELinux off by default to avoid that host-header mismatch.
 DISABLE_SELINUX="${DISABLE_SELINUX:-1}"
+# Building linux-4.19 with modern GCC can fail with:
+#   "-mindirect-branch and -fcf-protection are not compatible"
+# because some distros inject -fcf-protection by default.
+# Force disable it unless user opts out.
+DISABLE_FCF_PROTECTION="${DISABLE_FCF_PROTECTION:-1}"
 
 install_deps_if_needed
 
@@ -194,8 +199,17 @@ log "Building StateFuzz binaries..."
 )
 
 log "Configuring kernel for fuzzing..."
-make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" defconfig
-if ! make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" kvmconfig; then
+kernel_make_args=(-C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN")
+if [[ "$DISABLE_FCF_PROTECTION" == "1" ]]; then
+	kernel_make_args+=(
+		KCFLAGS=-fcf-protection=none
+		HOSTCFLAGS=-fcf-protection=none
+		HOSTCXXFLAGS=-fcf-protection=none
+	)
+fi
+
+make "${kernel_make_args[@]}" defconfig
+if ! make "${kernel_make_args[@]}" kvmconfig; then
 	log "kvmconfig not available, continuing with defconfig"
 fi
 
@@ -230,10 +244,10 @@ if [[ -x "$KERNEL_SRC/scripts/config" || -f "$KERNEL_SRC/scripts/config" ]]; the
 	"$KERNEL_SRC/scripts/config" "${config_args[@]}"
 fi
 
-make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" olddefconfig
+make "${kernel_make_args[@]}" olddefconfig
 
 log "Building Linux kernel $KERNEL_TAG (this can take a while)..."
-if ! make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" -j"$JOBS" bzImage vmlinux 2>&1 | tee "$KERNEL_BUILD_LOG"; then
+if ! make "${kernel_make_args[@]}" -j"$JOBS" bzImage vmlinux 2>&1 | tee "$KERNEL_BUILD_LOG"; then
 	log "Kernel build failed. Inspecting first compiler error..."
 	err_line="$(grep -n "error:" "$KERNEL_BUILD_LOG" | head -n1 | cut -d: -f1 || true)"
 	if [[ -n "${err_line}" ]]; then
