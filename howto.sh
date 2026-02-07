@@ -19,6 +19,11 @@ Important environment variables:
   VM_COUNT=...          Number of QEMU VMs (default: 2)
   PROCS=...             Fuzzer procs per VM (default: 2)
   HTTP_ADDR=...         Manager HTTP bind (default: 127.0.0.1:56741)
+  DISABLE_SELINUX=1     Disable CONFIG_SECURITY_SELINUX (default: 1)
+  DISABLE_FCF_PROTECTION=1
+                        Force -fcf-protection=none for kernel/host tools (default: 1)
+  DISABLE_OBJTOOL_PATH=1
+                        Disable ORC/stack validation/retpoline path (default: 1)
 
 Example:
   AUTO_INSTALL_DEPS=1 RUN_MANAGER=1 ./howto.sh
@@ -168,6 +173,9 @@ DISABLE_SELINUX="${DISABLE_SELINUX:-1}"
 # because some distros inject -fcf-protection by default.
 # Force disable it unless user opts out.
 DISABLE_FCF_PROTECTION="${DISABLE_FCF_PROTECTION:-1}"
+# On some modern hosts, linux-4.19 may fail in objtool/orc on thunk_64.o.
+# Disable these x86 hardening/validation knobs by default for compatibility.
+DISABLE_OBJTOOL_PATH="${DISABLE_OBJTOOL_PATH:-1}"
 
 install_deps_if_needed
 
@@ -240,6 +248,14 @@ if [[ -x "$KERNEL_SRC/scripts/config" || -f "$KERNEL_SRC/scripts/config" ]]; the
 	)
 	if [[ "$DISABLE_SELINUX" == "1" ]]; then
 		config_args+=( -d SECURITY_SELINUX )
+	fi
+	if [[ "$DISABLE_OBJTOOL_PATH" == "1" ]]; then
+		config_args+=(
+			-d RETPOLINE
+			-d STACK_VALIDATION
+			-d UNWINDER_ORC
+			-e UNWINDER_FRAME_POINTER
+		)
 	fi
 	"$KERNEL_SRC/scripts/config" "${config_args[@]}"
 fi
