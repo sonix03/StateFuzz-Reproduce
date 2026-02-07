@@ -157,6 +157,11 @@ CC_BIN="${CC_BIN:-gcc}"
 GO_BOOTSTRAP_VERSION="${GO_BOOTSTRAP_VERSION:-1.20.14}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-0}"
 RUN_MANAGER="${RUN_MANAGER:-0}"
+# Building old kernels (e.g. 4.19) on modern distros can fail in
+# scripts/selinux/genheaders with:
+#   "New address family defined, please update secclass_map."
+# Keep SELinux off by default to avoid that host-header mismatch.
+DISABLE_SELINUX="${DISABLE_SELINUX:-1}"
 
 install_deps_if_needed
 
@@ -195,7 +200,8 @@ fi
 
 if [[ -x "$KERNEL_SRC/scripts/config" || -f "$KERNEL_SRC/scripts/config" ]]; then
 	chmod +x "$KERNEL_SRC/scripts/config"
-	"$KERNEL_SRC/scripts/config" --file "$KERNEL_OBJ/.config" \
+	config_args=(
+		--file "$KERNEL_OBJ/.config"
 		-e KCOV \
 		-e KCOV_INSTRUMENT_ALL \
 		-e KCOV_ENABLE_COMPARISONS \
@@ -216,6 +222,11 @@ if [[ -x "$KERNEL_SRC/scripts/config" || -f "$KERNEL_SRC/scripts/config" ]]; the
 		-e KASAN \
 		-e KASAN_INLINE \
 		-d RANDOMIZE_BASE
+	)
+	if [[ "$DISABLE_SELINUX" == "1" ]]; then
+		config_args+=( -d SECURITY_SELINUX )
+	fi
+	"$KERNEL_SRC/scripts/config" "${config_args[@]}"
 fi
 
 make -C "$KERNEL_SRC" O="$KERNEL_OBJ" CC="$CC_BIN" olddefconfig
