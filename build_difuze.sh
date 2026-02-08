@@ -23,6 +23,10 @@ Environment variables:
   SPARSE_DIR=$DIFUZE_DIR/difuze_deps/sparse    sparse dependency dir
   SPARSE_REPO=git://git.kernel.org/pub/scm/devel/sparse/sparse.git
   SPARSE_TAG=v0.6.4
+  SPARSE_BUILD_MODE=auto                     auto|strict|minimal
+                                             auto: try full sparse build, fallback to sparse+cgcc
+                                             strict: fail if full sparse build fails
+                                             minimal: build sparse+cgcc only (skip sparse-llvm)
   C2XML_MODE=auto                            require|auto|skip
                                              require: fail if c2xml missing
                                              auto: use c2xml if available, else skip related steps
@@ -68,6 +72,19 @@ run_cmd() {
 }
 
 run_in_dir() {
+	local dir="$1"
+	shift
+	if [[ "$DRY_RUN" == "1" ]]; then
+		log "(cd $dir && $*)"
+		return 0
+	fi
+	(
+		cd "$dir"
+		"$@"
+	)
+}
+
+run_in_dir_allow_fail() {
 	local dir="$1"
 	shift
 	if [[ "$DRY_RUN" == "1" ]]; then
@@ -135,6 +152,7 @@ IS_CLANG_BUILD="${IS_CLANG_BUILD:-1}"
 SPARSE_DIR="${SPARSE_DIR:-$DIFUZE_DIR/difuze_deps/sparse}"
 SPARSE_REPO="${SPARSE_REPO:-git://git.kernel.org/pub/scm/devel/sparse/sparse.git}"
 SPARSE_TAG="${SPARSE_TAG:-v0.6.4}"
+SPARSE_BUILD_MODE="${SPARSE_BUILD_MODE:-auto}"
 C2XML_MODE="${C2XML_MODE:-auto}"
 
 APPLY_MANUAL_MAP="${APPLY_MANUAL_MAP:-1}"
@@ -173,6 +191,7 @@ if [[ "$CLEAN" == "1" ]]; then
 	log "Cleaning previous difuze artifacts..."
 	run_cmd rm -rf "$OUT_BASE" "$DIFUZE_DIR/InterfaceHandlers/MainAnalysisPasses/build_dir"
 fi
+run_cmd mkdir -p "$OUT_BASE"
 
 if [[ ! -d "$SPARSE_DIR/.git" ]]; then
 	log "Cloning sparse dependency..."
@@ -192,7 +211,51 @@ if [[ "$DRY_RUN" != "1" ]]; then
 		run_in_dir "$SPARSE_DIR" git fetch --tags
 		run_in_dir "$SPARSE_DIR" git checkout "$SPARSE_TAG"
 	fi
-	run_in_dir "$SPARSE_DIR" make -j"$(nproc)"
+
+	SPARSE_MAKEFILE="$SPARSE_DIR/Makefile"
+	if [[ -f "$SPARSE_MAKEFILE" ]]; then
+		# sparse v0.6.4 often links sparse-llvm with too few LLVM libs on modern toolchains.
+		if grep -q 'llvm-config --libs bitwriter' "$SPARSE_MAKEFILE"; then
+			log "Patching sparse Makefile for LLVM 11+ (bitwriter -> all --system-libs)"
+			run_cmd sed -i 's/llvm-config --libs bitwriter/llvm-config --libs all --system-libs/g' "$SPARSE_MAKEFILE"
+		elif grep -q 'llvm-config --libs' "$SPARSE_MAKEFILE" && ! grep -q 'llvm-config --libs all' "$SPARSE_MAKEFILE"; then
+			log "Patching sparse Makefile for LLVM 11+ (--libs -> --libs all --system-libs)"
+			run_cmd sed -i 's/llvm-config --libs/llvm-config --libs all --system-libs/g' "$SPARSE_MAKEFILE"
+		fi
+	fi
+
+	SPARSE_JOBS="$(nproc)"
+	SPARSE_LOG="$OUT_BASE/sparse-build.log"
+	LLVM_CFG_BIN="$LLVM_BIN_DIR/llvm-config"
+	[[ -x "$LLVM_CFG_BIN" ]] || die "llvm-config not found in LLVM_BIN_DIR: $LLVM_CFG_BIN"
+
+	case "$SPARSE_BUILD_MODE" in
+		strict)
+			log "Building sparse (strict mode)..."
+			run_in_dir "$SPARSE_DIR" env LLVM_CONFIG="$LLVM_CFG_BIN" make -j"$SPARSE_JOBS" \
+				2>&1 | tee "$SPARSE_LOG"
+			;;
+		minimal)
+			log "Building sparse minimal targets (sparse, cgcc)..."
+			run_in_dir_allow_fail "$SPARSE_DIR" make clean >/dev/null 2>&1 || true
+			run_in_dir "$SPARSE_DIR" env LLVM_CONFIG="$LLVM_CFG_BIN" make -j"$SPARSE_JOBS" sparse cgcc \
+				2>&1 | tee "$SPARSE_LOG"
+			;;
+		auto)
+			log "Building sparse (auto mode)..."
+			if ! run_in_dir_allow_fail "$SPARSE_DIR" env LLVM_CONFIG="$LLVM_CFG_BIN" make -j"$SPARSE_JOBS" \
+				2>&1 | tee "$SPARSE_LOG"; then
+				log "Full sparse build failed. Retrying minimal targets (sparse, cgcc)..."
+				run_in_dir_allow_fail "$SPARSE_DIR" make clean >/dev/null 2>&1 || true
+				run_in_dir "$SPARSE_DIR" env LLVM_CONFIG="$LLVM_CFG_BIN" make -j"$SPARSE_JOBS" sparse cgcc \
+					2>&1 | tee "$SPARSE_LOG"
+				log "Continuing with sparse minimal build (sparse-llvm skipped)."
+			fi
+			;;
+		*)
+			die "Invalid SPARSE_BUILD_MODE=$SPARSE_BUILD_MODE (valid: auto|strict|minimal)"
+			;;
+	esac
 fi
 
 log "Building difuze InterfaceHandlers..."
