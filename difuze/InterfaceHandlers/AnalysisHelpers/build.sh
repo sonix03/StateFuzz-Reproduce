@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-BASEDIR=$(dirname "$0")
+set -euo pipefail
+
+BASEDIR="$(cd "$(dirname "$0")" && pwd)"
 echo "[*] Trying to Build Dr_linker"
-cd $BASEDIR/Dr_linker
-./build.sh
-cd ..
+(
+  cd "$BASEDIR/Dr_linker"
+  bash ./build.sh
+)
 echo "[*] Trying to Build EntryPointIdentifier"
-cd $BASEDIR/EntryPointIdentifier
-./build.sh
+(
+  cd "$BASEDIR/EntryPointIdentifier"
+  bash ./build.sh
+)

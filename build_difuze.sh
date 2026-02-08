@@ -262,6 +262,11 @@ log "Building difuze InterfaceHandlers..."
 run_cmd rm -rf "$DIFUZE_DIR/InterfaceHandlers/MainAnalysisPasses/build_dir"
 run_in_dir "$DIFUZE_DIR/InterfaceHandlers" bash ./build.sh
 
+DR_LINK_BIN="$DIFUZE_DIR/InterfaceHandlers/AnalysisHelpers/Dr_linker/dr_linker"
+ENTRY_POINT_BIN="$DIFUZE_DIR/InterfaceHandlers/AnalysisHelpers/EntryPointIdentifier/entry_point_handler"
+[[ "$DRY_RUN" == "1" || -x "$DR_LINK_BIN" ]] || die "AnalysisHelpers build incomplete, missing: $DR_LINK_BIN"
+[[ "$DRY_RUN" == "1" || -x "$ENTRY_POINT_BIN" ]] || die "AnalysisHelpers build incomplete, missing: $ENTRY_POINT_BIN"
+
 run_cmd mkdir -p "$OUT_BASE" "$LLVM_BC_OUT" "$IOCTL_OUT"
 
 log "Running difuze helper_scripts/run_all.py ..."

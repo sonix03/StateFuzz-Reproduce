@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
-BASEDIR=$(dirname "$0")
+set -euo pipefail
+
+BASEDIR="$(cd "$(dirname "$0")" && pwd)"
 echo "[*] Trying to Build AnalysisHelpers"
-cd $BASEDIR/AnalysisHelpers
-./build.sh
-cd ..
+(
+  cd "$BASEDIR/AnalysisHelpers"
+  bash ./build.sh
+)
 echo "[*] Trying to Build MainAnalysisPasses"
-cd $BASEDIR/MainAnalysisPasses
-./build.sh
+(
+  cd "$BASEDIR/MainAnalysisPasses"
+  bash ./build.sh
+)
