@@ -16,6 +16,9 @@ Environment variables:
   USE_NINJA=0                             Use Ninja generator instead of Make
   INSTALL=0                               Run install step after build
   INSTALL_PREFIX=$LLVM_BUILD_DIR/install  Install prefix (if INSTALL=1)
+  DISABLE_BENCHMARKS=1                    Set LLVM_INCLUDE_BENCHMARKS/LLVM_BUILD_BENCHMARKS=OFF
+  DISABLE_TESTS=1                         Set LLVM_INCLUDE_TESTS=OFF
+  DISABLE_EXAMPLES=1                      Set LLVM_INCLUDE_EXAMPLES=OFF
   CMAKE_ARGS=""                           Extra args for cmake (quoted string)
 
 Examples:
@@ -52,12 +55,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LLVM_SRC="${LLVM_SRC:-$SCRIPT_DIR/llvm-11.0.1}"
 LLVM_BUILD_DIR="${LLVM_BUILD_DIR:-$LLVM_SRC/build}"
 BUILD_TYPE="${BUILD_TYPE:-Release}"
-JOBS="${JOBS:-$(nproc)}"
+if command -v nproc >/dev/null 2>&1; then
+	DEFAULT_JOBS="$(nproc)"
+else
+	DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
+fi
+JOBS="${JOBS:-$DEFAULT_JOBS}"
 CLEAN="${CLEAN:-1}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-0}"
 USE_NINJA="${USE_NINJA:-0}"
 INSTALL="${INSTALL:-0}"
 INSTALL_PREFIX="${INSTALL_PREFIX:-$LLVM_BUILD_DIR/install}"
+DISABLE_BENCHMARKS="${DISABLE_BENCHMARKS:-1}"
+DISABLE_TESTS="${DISABLE_TESTS:-1}"
+DISABLE_EXAMPLES="${DISABLE_EXAMPLES:-1}"
 CMAKE_ARGS="${CMAKE_ARGS:-}"
 
 [[ -d "$LLVM_SRC" ]] || die "LLVM_SRC not found: $LLVM_SRC"
@@ -89,6 +100,18 @@ if [[ "$USE_NINJA" == "1" ]]; then
 fi
 if [[ "$INSTALL" == "1" ]]; then
 	cmake_cmd+=( -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" )
+fi
+if [[ "$DISABLE_BENCHMARKS" == "1" ]]; then
+	cmake_cmd+=(
+		-DLLVM_INCLUDE_BENCHMARKS=OFF
+		-DLLVM_BUILD_BENCHMARKS=OFF
+	)
+fi
+if [[ "$DISABLE_TESTS" == "1" ]]; then
+	cmake_cmd+=( -DLLVM_INCLUDE_TESTS=OFF )
+fi
+if [[ "$DISABLE_EXAMPLES" == "1" ]]; then
+	cmake_cmd+=( -DLLVM_INCLUDE_EXAMPLES=OFF )
 fi
 if [[ -n "$CMAKE_ARGS" ]]; then
 	# shellcheck disable=SC2206
