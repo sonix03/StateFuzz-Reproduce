@@ -76,11 +76,15 @@ CMAKE_ARGS="${CMAKE_ARGS:-}"
 
 if [[ "$AUTO_INSTALL_DEPS" == "1" ]]; then
 	run_cmd sudo apt-get update
-	run_cmd sudo apt-get install -y build-essential cmake python3 zlib1g-dev libxml2-dev ninja-build
+	run_cmd sudo apt-get install -y build-essential cmake python3 zlib1g-dev libxml2-dev ninja-build libz3-dev
 fi
 
 require_cmd cmake
 require_cmd make
+
+if [[ ! -f /usr/include/z3++.h && ! -f /usr/local/include/z3++.h ]]; then
+	die "Missing z3++.h (install libz3-dev or set CMAKE_ARGS with Z3 include/lib paths)"
+fi
 
 if [[ "$USE_NINJA" == "1" ]]; then
 	require_cmd ninja
