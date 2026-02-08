@@ -87,7 +87,10 @@ require_cmd tee
 [[ -f "$HFL_SCRIPTS/common.sh" ]] || die "common.sh not found: $HFL_SCRIPTS/common.sh"
 [[ -f "$CONFIG_FILE" ]] || die "Config file not found: $CONFIG_FILE"
 
-PY2="$(detect_py2)"
+PY2=""
+if [[ "$ENABLE_S2E" == "1" || "$ENABLE_AGENT" == "1" ]]; then
+	PY2="$(detect_py2)"
+fi
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
 	die "tmux session '$SESSION' already exists"
