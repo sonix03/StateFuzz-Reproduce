@@ -16,7 +16,8 @@ if LLVM_LIBS="$("$LLVM_CONFIG_BIN" --link-shared --libs 2>/dev/null)" && [[ -n "
 else
   LLVM_LIBS="$("$LLVM_CONFIG_BIN" --libs core irreader bitreader bitwriter support)"
 fi
+LLVM_TERM_LIBS="${LLVM_TERM_LIBS:--ltinfo}"
 
 # shellcheck disable=SC2086
 g++ "$BASEDIR/src/main.cpp" -fpermissive -o "$BASEDIR/entry_point_handler" \
-  $LLVM_CXXFLAGS $LLVM_LDFLAGS $LLVM_LIBS $LLVM_SYS_LIBS
+  $LLVM_CXXFLAGS $LLVM_LDFLAGS $LLVM_LIBS $LLVM_SYS_LIBS $LLVM_TERM_LIBS
