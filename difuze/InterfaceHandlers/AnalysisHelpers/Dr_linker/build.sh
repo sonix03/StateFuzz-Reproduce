@@ -10,7 +10,7 @@ fi
 
 LLVM_CXXFLAGS="$("$LLVM_CONFIG_BIN" --cxxflags)"
 LLVM_LDFLAGS="$("$LLVM_CONFIG_BIN" --ldflags)"
-LLVM_SYS_LIBS="$("$LLVM_CONFIG_BIN" --system-libs)"
+LLVM_SYS_LIBS="$("$LLVM_CONFIG_BIN" --system-libs 2>/dev/null || true)"
 if LLVM_LIBS="$("$LLVM_CONFIG_BIN" --link-shared --libs 2>/dev/null)" && [[ -n "$LLVM_LIBS" ]]; then
   :
 else
