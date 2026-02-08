@@ -23,6 +23,10 @@ Environment variables:
   SPARSE_DIR=$DIFUZE_DIR/difuze_deps/sparse    sparse dependency dir
   SPARSE_REPO=git://git.kernel.org/pub/scm/devel/sparse/sparse.git
   SPARSE_TAG=v0.6.4
+  C2XML_MODE=auto                            require|auto|skip
+                                             require: fail if c2xml missing
+                                             auto: use c2xml if available, else skip related steps
+                                             skip: always skip c2xml-related steps
   APPLY_MANUAL_MAP=1                           Run parse_interface_with_manual_interface.py
   MANUAL_CSV=.../interface_manual_linux.csv    Manual device mapping csv
   CLEAN=0                                      Remove OUT_BASE and rebuild artifacts first
@@ -131,6 +135,7 @@ IS_CLANG_BUILD="${IS_CLANG_BUILD:-1}"
 SPARSE_DIR="${SPARSE_DIR:-$DIFUZE_DIR/difuze_deps/sparse}"
 SPARSE_REPO="${SPARSE_REPO:-git://git.kernel.org/pub/scm/devel/sparse/sparse.git}"
 SPARSE_TAG="${SPARSE_TAG:-v0.6.4}"
+C2XML_MODE="${C2XML_MODE:-auto}"
 
 APPLY_MANUAL_MAP="${APPLY_MANUAL_MAP:-1}"
 MANUAL_CSV="${MANUAL_CSV:-$DIFUZE_DIR/helper_scripts/interface_manual_linux.csv}"
@@ -162,7 +167,6 @@ if [[ "$DRY_RUN" != "1" ]]; then
 	require_cmd g++
 	require_cmd llvm-config
 	require_cmd opt
-	require_cmd c2xml
 fi
 
 if [[ "$CLEAN" == "1" ]]; then
@@ -214,6 +218,29 @@ run_all_args=(
 if [[ "$IS_CLANG_BUILD" == "1" ]]; then
 	run_all_args+=( -isclang )
 fi
+
+case "$C2XML_MODE" in
+	require)
+		if [[ "$DRY_RUN" != "1" ]]; then
+			require_cmd c2xml
+		fi
+		;;
+	auto)
+		if [[ "$DRY_RUN" != "1" ]]; then
+			if ! command -v c2xml >/dev/null 2>&1; then
+				log "c2xml not found, auto-skipping GenerateIncludes/ParseHeaders/V4L2 steps"
+				run_all_args+=( -skI -skp -skv )
+			fi
+		fi
+		;;
+	skip)
+		log "Skipping c2xml-related steps by request (C2XML_MODE=skip)"
+		run_all_args+=( -skI -skp -skv )
+		;;
+	*)
+		die "Invalid C2XML_MODE=$C2XML_MODE (valid: require|auto|skip)"
+		;;
+esac
 
 if [[ "$DRY_RUN" == "1" ]]; then
 	log "(cd $DIFUZE_DIR/helper_scripts && $PY2 ${run_all_args[*]} | tee $RUN_ALL_LOG)"
