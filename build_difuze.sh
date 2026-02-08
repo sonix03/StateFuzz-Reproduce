@@ -260,12 +260,14 @@ fi
 
 log "Building difuze InterfaceHandlers..."
 run_cmd rm -rf "$DIFUZE_DIR/InterfaceHandlers/MainAnalysisPasses/build_dir"
-run_in_dir "$DIFUZE_DIR/InterfaceHandlers" ./build.sh
+run_in_dir "$DIFUZE_DIR/InterfaceHandlers" bash ./build.sh
 
 run_cmd mkdir -p "$OUT_BASE" "$LLVM_BC_OUT" "$IOCTL_OUT"
 
 log "Running difuze helper_scripts/run_all.py ..."
 RUN_ALL_LOG="$OUT_BASE/difuze-run_all.log"
+NEED_C2XML_SHIM=0
+C2XML_SHIM_DIR="$OUT_BASE/.shim-bin"
 run_all_args=(
 	run_all.py
 	-l "$LLVM_BC_OUT"
@@ -293,24 +295,40 @@ case "$C2XML_MODE" in
 			if ! command -v c2xml >/dev/null 2>&1; then
 				log "c2xml not found, auto-skipping GenerateIncludes/ParseHeaders/V4L2 steps"
 				run_all_args+=( -skI -skp -skv )
+				NEED_C2XML_SHIM=1
 			fi
 		fi
 		;;
 	skip)
 		log "Skipping c2xml-related steps by request (C2XML_MODE=skip)"
 		run_all_args+=( -skI -skp -skv )
+		NEED_C2XML_SHIM=1
 		;;
 	*)
 		die "Invalid C2XML_MODE=$C2XML_MODE (valid: require|auto|skip)"
 		;;
 esac
 
+if [[ "$NEED_C2XML_SHIM" == "1" ]]; then
+	if [[ "$DRY_RUN" == "1" ]]; then
+		log "mkdir -p $C2XML_SHIM_DIR && create c2xml shim"
+	else
+		run_cmd mkdir -p "$C2XML_SHIM_DIR"
+		printf '#!/usr/bin/env bash\nexit 0\n' > "$C2XML_SHIM_DIR/c2xml"
+		run_cmd chmod +x "$C2XML_SHIM_DIR/c2xml"
+	fi
+fi
+
 if [[ "$DRY_RUN" == "1" ]]; then
 	log "(cd $DIFUZE_DIR/helper_scripts && $PY2 ${run_all_args[*]} | tee $RUN_ALL_LOG)"
 else
 	(
 		cd "$DIFUZE_DIR/helper_scripts"
-		"$PY2" "${run_all_args[@]}" 2>&1 | tee "$RUN_ALL_LOG"
+		if [[ "$NEED_C2XML_SHIM" == "1" ]]; then
+			PATH="$C2XML_SHIM_DIR:$PATH" "$PY2" "${run_all_args[@]}" 2>&1 | tee "$RUN_ALL_LOG"
+		else
+			"$PY2" "${run_all_args[@]}" 2>&1 | tee "$RUN_ALL_LOG"
+		fi
 	)
 fi
 
